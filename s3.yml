@@ -1,0 +1,115 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'S3 resources'
+
+
+Parameters:
+  NameTag:
+    Type: String
+  ELBPrincipal:
+    Type: String
+  RetentionInDays:
+    Type: String
+
+
+Resources:
+  ImagesBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      AccessControl: PublicRead
+      LifecycleConfiguration:
+        Rules:
+        - Status: Enabled
+          ExpirationInDays: !Ref 'RetentionInDays'
+      Tags:
+      - Key: Name
+        Value: !Sub '${NameTag}'
+
+  EBSLogsBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      AccessControl: Private
+      LifecycleConfiguration:
+        Rules:
+        - Status: Enabled
+          ExpirationInDays: !Ref 'RetentionInDays'
+      Tags:
+      - Key: Name
+        Value: !Sub '${NameTag}'
+
+  ELBLogsBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      AccessControl: Private
+      LifecycleConfiguration:
+        Rules:
+        - Status: Enabled
+          ExpirationInDays: !Ref 'RetentionInDays'
+      Tags:
+      - Key: Name
+        Value: !Sub '${NameTag}'
+
+  ELBLogsBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref 'ELBLogsBucket'
+      PolicyDocument:
+        Statement:
+        - Action:
+          - 's3:PutObject'
+          Effect: 'Allow'
+          Principal:
+            AWS: !Ref 'ELBPrincipal'
+          Resource:
+          - !Sub 'arn:${AWS::Partition}:s3:::${ELBLogsBucket}/*'
+
+
+Outputs:
+  S3StackName:
+    Value: !Ref 'AWS::StackName'
+    Export:
+      Name: !Sub 'S3StackName-${AWS::StackName}'
+  ImagesBucket:
+    Value: !Ref 'ImagesBucket'
+    Export:
+      Name: !Sub 'ImagesBucket-${AWS::StackName}'
+  ImagesBucketArn:
+    Value: !GetAtt ImagesBucket.Arn
+    Export:
+      Name: !Sub 'ImagesBucketArn-${AWS::StackName}'
+  ImagesBucketDomainName:
+    Value: !GetAtt ImagesBucket.DomainName
+    Export:
+      Name: !Sub 'ImagesBucketDomainName-${AWS::StackName}'
+  EBSLogsBucket:
+    Value: !Ref 'EBSLogsBucket'
+    Export:
+      Name: !Sub 'EBSLogsBucket-${AWS::StackName}'
+  EBSLogsBucketArn:
+    Value: !GetAtt EBSLogsBucket.Arn
+    Export:
+      Name: !Sub 'EBSLogsBucketArn-${AWS::StackName}'
+  EBSLogsBucketDomainName:
+    Value: !GetAtt EBSLogsBucket.DomainName
+    Export:
+      Name: !Sub 'EBSLogsBucketDomainName-${AWS::StackName}'
+  EBSLogsBucketDualStackDomainName:
+    Value: !GetAtt EBSLogsBucket.DualStackDomainName
+    Export:
+      Name: !Sub 'EBSLogsBucketDualStackDomainName-${AWS::StackName}'
+  ELBLogsBucket:
+    Value: !Ref 'ELBLogsBucket'
+    Export:
+      Name: !Sub 'ELBLogsBucket-${AWS::StackName}'
+  ELBLogsBucketArn:
+    Value: !GetAtt ELBLogsBucket.Arn
+    Export:
+      Name: !Sub 'ELBLogsBucketArn-${AWS::StackName}'
+  ELBLogsBucketDomainName:
+    Value: !GetAtt ELBLogsBucket.DomainName
+    Export:
+      Name: !Sub 'ELBLogsBucketDomainName-${AWS::StackName}'
+  ELBLogsBucketDualStackDomainName:
+    Value: !GetAtt ELBLogsBucket.DualStackDomainName
+    Export:
+      Name: !Sub 'ELBLogsBucketDualStackDomainName-${AWS::StackName}'

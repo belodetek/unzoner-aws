@@ -1,0 +1,155 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'IAM resources'
+
+
+Parameters:
+  NameTag:
+    Type: String
+  ImagesBucket:
+    Type: String
+
+
+Resources:
+  InstanceProfileRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - 'ec2.amazonaws.com'
+          Action:
+          - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+      - PolicyName: 'CustomPolicy'
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 's3:GetEncryptionConfiguration'
+            - 'ssm:UpdateInstanceInformation'
+            - 'ssmmessages:CreateControlChannel'
+            - 'ssmmessages:CreateDataChannel'
+            - 'ssmmessages:OpenControlChannel'
+            - 'ssmmessages:OpenDataChannel'
+            Resource: '*'
+      ManagedPolicyArns:
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess'
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AWSElasticBeanstalkWebTier'
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AWSElasticBeanstalkWorkerTier'
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonEC2RoleforSSM'
+
+  InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: '/'
+      Roles:
+        - !Ref 'InstanceProfileRole'
+
+  ServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - 'elasticbeanstalk.amazonaws.com'
+          Action:
+          - 'sts:AssumeRole'
+          Condition:
+            StringEquals:
+              sts:ExternalId: elasticbeanstalk
+      Path: '/'
+      ManagedPolicyArns:
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth'
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSElasticBeanstalkService'
+
+  User:
+    Type: 'AWS::IAM::User'
+    Properties:
+      Policies:
+      - PolicyName: 'CustomPolicy'
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 's3:Put*'
+            Resource:
+            - !Sub 'arn:${AWS::Partition}:s3:::${ImagesBucket}'
+            - !Sub 'arn:${AWS::Partition}:s3:::${ImagesBucket}/*'
+      ManagedPolicyArns:
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess'
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess-AWSElasticBeanstalk'
+
+  AccessKey:
+    Type: 'Custom::AccessKey'
+    DependsOn: User
+    Version: 1.0
+    Properties:
+      UserName: !Ref 'User'
+      ParameterPath: !Sub '/iam-users/${AWS::StackName}/${User}'
+      Serial: 1
+      Status: Active
+      ReturnSecret: True
+      ReturnPassword: True
+      NoEcho: False
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider'
+
+
+Outputs:
+  IAMStackName:
+    Value: !Ref 'AWS::StackName'
+    Export:
+      Name: !Sub 'IAMStackName-${AWS::StackName}'
+  ServiceRole:
+    Value: !Ref 'ServiceRole'
+    Export:
+      Name: !Sub 'ServiceRole-${AWS::StackName}'
+  ServiceRoleArn:
+    Value: !GetAtt ServiceRole.Arn
+    Export:
+      Name: !Sub 'ServiceRoleArn-${AWS::StackName}'
+  ServiceRoleId:
+    Value: !GetAtt ServiceRole.RoleId
+    Export:
+      Name: !Sub 'ServiceRoleId-${AWS::StackName}'
+  InstanceProfileRole:
+    Value: !Ref 'InstanceProfileRole'
+    Export:
+      Name: !Sub 'InstanceProfileRole-${AWS::StackName}'
+  InstanceProfileRoleArn:
+    Value: !GetAtt InstanceProfileRole.Arn
+    Export:
+      Name: !Sub 'InstanceProfileRoleArn-${AWS::StackName}'
+  InstanceProfileRoleId:
+    Value: !GetAtt InstanceProfileRole.RoleId
+    Export:
+      Name: !Sub 'InstanceProfileRoleId-${AWS::StackName}'
+  InstanceProfile:
+    Value: !Ref 'InstanceProfile'
+    Export:
+      Name: !Sub 'InstanceProfile-${AWS::StackName}'
+  InstanceProfileArn:
+    Value: !GetAtt InstanceProfile.Arn
+    Export:
+      Name: !Sub 'InstanceProfileArn-${AWS::StackName}'
+  User:
+    Value: !Ref 'User'
+    Export:
+      Name: !Sub 'User-${AWS::StackName}'
+  AccessKey:
+    Value: !Ref 'AccessKey'
+    Export:
+      Name: !Sub 'AccessKey-${AWS::StackName}'
+  SecretAccessKey:
+    Value: !Sub '/iam-users/${AWS::StackName}/${User}/aws_secret_access_key'
+    Export:
+      Name: !Sub 'SecretAccessKey-${AWS::StackName}'

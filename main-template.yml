@@ -1,0 +1,1002 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'black.box Unzoner'
+
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Common parameters'
+      Parameters:
+      - TimeoutInMinutes
+      - NotificationTopic
+      - RetentionInDays
+    - Label:
+        default: 'VPC parameters'
+      Parameters:
+      - ClassB
+    - Label:
+        default: 'Route53 parameters'
+      Parameters:
+      - DomainName
+    - Label:
+        default: 'Lambda parameters'
+      Parameters:
+      - AppIds
+    - Label:
+        default: 'marbot.io parameters'
+      Parameters:
+      - AlertEmail
+      - MarbotEndpointId
+    - Label:
+        default: 'RDS parameters'
+      Parameters:
+      - DBInstanceClass
+      - StorageEncrypted
+    - Label:
+        default: 'ElastiCache parameters'
+      Parameters:
+      - CacheNodeType
+      - TransitEncryption
+    - Label:
+        default: 'Elastic Beanstalk (EBS) parameters'
+      Parameters:
+      - InstanceSize
+      - InstanceSizeSpot
+      - SpotInstance
+      - MinInstancesInService
+      - MinSize
+      - MaxSize
+      - SolutionStackName
+      - MgmtCidrBlock
+      - BackendAppBundle
+      - FrontendAppBundle
+      - OnDemandBaseCapacity
+      - OnDemandPercentageAboveBaseCapacity
+    - Label:
+        default: 'Sumo Logic parameters'
+      Parameters:
+      - SumoLogicAccountId
+    - Label:
+        default: 'Nested templates'
+      Parameters:
+      - VPCTemplate
+      - KMSTemplate
+      - PasswordTemplate
+      - LambdaTemplate
+      - SecretsTemplate
+      - AlertTemplate
+      - R53Template
+      - S3Template
+      - IAMTemplate
+      - CloudWatchTemplate
+      - ACMTemplate
+      - EBSTemplate
+      - ECTemplate
+      - RDSTemplate
+      - SGTemplate
+
+
+Parameters:
+  AppIds:
+    Description: Comma separated list of balena applications to purge devices from.
+    Type: String
+  CustomResourceLambda:
+    Description: 'Specify if the account already contains generic-custom-resource-provider Lambda.'
+    Type: String
+    Default: ''
+    AllowedValues:
+    - ''
+    - 'generic-custom-resource-provider'
+  SecretsLambda:
+    Description: 'Specify if the account already contains cfn-secret-provider Lambda.'
+    Type: String
+    Default: ''
+    AllowedValues:
+    - ''
+    - 'binxio-cfn-secret-provider'
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-autoscaling-autoscalinggroup-instancesdistribution.html
+  OnDemandBaseCapacity:
+    Description: The minimum amount of the Auto Scaling group's capacity that must be fulfilled by On-Demand Instances. This base portion is provisioned first as your group scales.
+    Type: String
+    Default: 0
+  OnDemandPercentageAboveBaseCapacity:
+    Description: Controls the percentages of On-Demand Instances and Spot Instances for your additional capacity beyond OnDemandBaseCapacity.
+    Type: String
+    Default: 0
+  BackendAppBundle:
+    Description: 'Optional backend application version/bundle to deploy.'
+    Type: String
+    Default: ''
+  FrontendAppBundle:
+    Description: 'Optional frontend application version/bundle to deploy.'
+    Type: String
+    Default: ''
+  TransitEncryption:
+    Description: 'Redis authentication.'
+    Type: String
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  StorageEncrypted:
+    Description: 'Encrypt RDS.'
+    Type: String
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  MgmtCidrBlock:
+    Description: 'Restrict SSH access.'
+    Type: String
+    Default: '178.62.97.178/32'
+  # https://docs.aws.amazon.com/elasticbeanstalk/latest/platforms/platforms-supported.html#platforms-supported.python
+  SolutionStackName:
+    Type: String
+    Default: '64bit Amazon Linux 2 v3.3.12 running Python 3.8'
+  MarbotEndpointId:
+    Description: 'Specify marbot.io endpoint ID (e.g. #alerts:@marbot show me my endpoint id).'
+    Type: String
+    NoEcho: true
+    Default: ''
+  AlertEmail:
+    Description: 'Optional email address that will receive alerts.'
+    Type: String
+    Default: 'z1p0y9w9e4d3n3w6@unzoner.slack.com'
+  SumoLogicAccountId:
+    Description: 'Specify Sumo Logic account ID for cross-account S3 logs access.'
+    Type: String
+    Default: 'eu:000000000011DD3A'
+  # only t2|t3.micro covered under AWS Free tier
+  InstanceSize:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+    - t2.micro
+    - t3.micro
+    - t3a.nano
+    - t3a.micro
+    - t3a.small
+    - t3a.medium
+    - t3a.large
+    - t4g.nano
+    - t4g.micro
+    - t4g.small
+    - t4g.medium
+    - t4g.large
+  InstanceSizeSpot:
+    Type: String
+    Default: t4g.nano
+    AllowedValues:
+    - t2.micro
+    - t3.micro
+    - t3a.nano
+    - t3a.micro
+    - t3a.small
+    - t3a.medium
+    - t3a.large
+    - t4g.nano
+    - t4g.micro
+    - t4g.small
+    - t4g.medium
+    - t4g.large
+  CacheNodeType:
+    Type: String
+    Default: cache.t3.micro
+    AllowedValues:
+    - cache.t2.micro
+    - cache.t2.small
+    - cache.t2.medium
+    - cache.t2.large
+    - cache.t3.micro
+    - cache.t3.small
+    - cache.t3.medium
+    - cache.t3.large
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    AllowedValues:
+    - db.t2.micro
+    - db.t3.micro
+    - db.t3.small
+    - db.t3.medium
+    - db.t3.large
+    - db.t4g.micro
+    - db.t4g.small
+    - db.t4g.medium
+    - db.t4g.large
+  # https://aws.amazon.com/ec2/spot/pricing/
+  SpotInstance:
+    Description: 'Specify whether or not to provision (cheaper) spot instances for backend (API).'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  MinInstancesInService:
+    Type: Number
+    Default: 0
+  MinSize:
+    Type: Number
+    Default: 1
+  MaxSize:
+    Type: Number
+    Default: 2
+  RetentionInDays:
+    Type: Number
+    Default: 7
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365]
+  DomainName:
+    Type: String
+    Default: 'unzoner.com'
+  NotificationTopic:
+    Description: 'Specify optional SNS topic for initial CloudFormation event notifications.'
+    Type: String
+    Default: ''
+  TimeoutInMinutes:
+    Description: 'Specify optional timeout in minutes for stack creation.'
+    Type: Number
+    Default: 60
+  ClassB:
+    Type: String
+    Default: '0'
+
+  # --- template feature switches
+  VPCTemplate:
+    Description: 'VPC resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  KMSTemplate:
+    Description: 'KMS resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  PasswordTemplate:
+    Description: 'Account Password Policy resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  LambdaTemplate:
+    Description: 'Lambda resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  SecretsTemplate:
+    Description: 'Secret Provider resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  AlertTemplate:
+    Description: 'marbot.io alert resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  R53Template:
+    Description: 'R53 resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  S3Template:
+    Description: 'S3 resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  IAMTemplate:
+    Description: 'Nested template containing IAM resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  CloudWatchTemplate:
+    Description: 'Nested template containing CloudWatch resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  ACMTemplate:
+    Description: 'Nested template containing ACM resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  EBSTemplate:
+    Description: 'Nested template containing EBS resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  ECTemplate:
+    Description: 'ElastiCache resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  RDSTemplate:
+    Description: 'RDS resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  SGTemplate:
+    Description: 'Security Group resources.'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  # --- end
+
+
+Mappings:
+  # https://docs.aws.amazon.com/elasticloadbalancing/latest/classic/enable-access-logs.html#attach-bucket-policy
+  RegionMap:
+    us-east-1:
+      'AWS': 127311923021
+    us-west-2:
+      'AWS': 797873946194
+    eu-west-1:
+      'AWS': 156460612806
+
+  InstanceLookup:
+    t2.micro:
+      'Alias': 't2micro'
+    t3.micro:
+      'Alias': 't3micro'
+    t3a.nano:
+      'Alias': 't3anano'
+    t3a.micro:
+      'Alias': 't3amicro'
+    t3a.small:
+      'Alias': 't3asmall'
+    t3a.medium:
+      'Alias': 't3amedium'
+    t3a.large:
+      'Alias': 't3alarge'
+    t4g.nano:
+      'Alias': 't4gnano'
+    t4g.micro:
+      'Alias': 't4gmicro'
+    t4g.small:
+      'Alias': 't4gsmall'
+    t4g.medium:
+      'Alias': 't4gmedium'
+    t4g.large:
+      'Alias': 't4glarge'
+
+  # https://aws.amazon.com/ec2/pricing/on-demand/
+  SpotPriceMap:
+    # North Virginia
+    us-east-1:
+      't2micro': 0.0116
+      't3micro': 0.0104
+      't3anano': 0.0047
+      't3amicro': 0.0094
+      't3asmall': 0.0188
+      't3amedium': 0.0376
+      't3alarge': 0.0752
+      't4gnano': 0.0042
+      't4gmicro': 0.0084
+      't4gsmall': 0.0168
+      't4gmedium': 0.0336
+      't4glarge': 0.0672
+    # Ireland
+    eu-west-1:
+      't2micro': 0.0126
+      't3micro': 0.0114
+      't3anano': 0.0051
+      't3amicro': 0.0102
+      't3asmall': 0.0204
+      't3amedium': 0.0408
+      't3alarge': 0.0816
+      't4gnano': 0.0046
+      't4gmicro': 0.0092
+      't4gsmall': 0.0184
+      't4gmedium': 0.0368
+      't4glarge': 0.0736
+    # Oregon
+    us-west-2:
+      't2micro': 0.0116
+      't3micro': 0.0104
+      't3anano': 0.0047
+      't3amicro': 0.0094
+      't3asmall': 0.0188
+      't3amedium': 0.0376
+      't3alarge': 0.0752
+      't4gnano': 0.0042
+      't4gmicro': 0.0084
+      't4gsmall': 0.0168
+      't4gmedium': 0.0336
+      't4glarge': 0.0672
+
+
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/conditions-section-structure.html
+Conditions:
+  HasNotifySNS: !Not [ !Equals [ '', !Ref 'NotificationTopic' ]]
+  HasMarbot: !Not [ !Equals [ '', !Ref 'MarbotEndpointId' ]]
+  HasSumo: !Not [ !Equals [ '', !Ref 'SumoLogicAccountId' ]]
+  HasEmail: !Not [ !Equals [ '', !Ref 'AlertEmail' ]]
+  HasTransitEncryption: !Not [ !Equals [ 'false', !Ref 'TransitEncryption' ]]
+  HasKMS: !Equals [ 'true', !Ref 'KMSTemplate' ]
+  HasStorageEncrypted: !And
+  - !Equals [ 'true', !Ref 'KMSTemplate' ]
+  - !Equals [ 'true', !Ref 'StorageEncrypted' ]
+  - !Not [ !Equals [ 'db.t2.micro', !Ref 'DBInstanceClass' ]]
+  HasR53: !Equals [ 'true', !Ref 'R53Template' ]
+  HasACM: !And
+  - !Equals [ 'true', !Ref 'ACMTemplate' ]
+  - !Condition HasR53
+  HasSecrets: !Equals [ 'true', !Ref 'SecretsTemplate' ]
+  HasCW: !Equals [ 'true', !Ref 'CloudWatchTemplate' ]
+  HasVPC: !Equals [ 'true', !Ref 'VPCTemplate' ]
+  HasAlert: !Equals [ 'true', !Ref 'AlertTemplate' ]
+  HasSG: !And
+  - !Equals [ 'true', !Ref 'SGTemplate' ]
+  - !Condition HasVPC
+  HasLambda: !And
+  - !Equals [ 'true', !Ref 'LambdaTemplate' ]
+  - !Condition HasKMS
+  HasS3: !Equals [ 'true', !Ref 'S3Template' ]
+  HasIAM: !And
+  - !Equals [ 'true', !Ref 'IAMTemplate' ]
+  - !Condition HasS3
+  HasRDS: !And
+  - !Equals [ 'true', !Ref 'RDSTemplate' ]
+  - !Condition HasSG
+  HasEC: !And
+  - !Equals [ 'true', !Ref 'ECTemplate' ]
+  - !Condition HasSG
+  HasEBS: !And
+  - !Equals [ 'true', !Ref 'EBSTemplate' ]
+  - !Condition HasSG
+  - !Condition HasIAM
+  - !Condition HasRDS
+  - !Condition HasEC
+
+
+Resources:
+  AlertStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasAlert
+    Properties:
+      TemplateURL: 'aws-cf-templates/operations/alert.yaml'
+      Parameters:
+        HttpsEndpoint: !If
+        - HasMarbot
+        - !Sub 'https://api.marbot.io/v1/endpoint/${MarbotEndpointId}'
+        - !Ref 'AWS::NoValue'
+        Email: !If [ HasEmail, !Ref 'AlertEmail', !Ref 'AWS::NoValue' ]
+      NotificationARNs:
+      - !If [ HasNotifySNS, !Ref 'NotificationTopic', !Ref 'AWS::NoValue' ]
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+  LambdaStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasLambda
+    Properties:
+      TemplateURL: 'lambda-template.yml'
+      Parameters:
+        NameTag: !Sub '${AWS::StackName}'
+        KmsKeyArn: !GetAtt [ KMSStack, Outputs.KeyArn ]
+        APISecretPath: !Sub '/${AWS::StackName}/API_SECRET'
+        AppIds: !Ref AppIds
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+  SecretsStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasSecrets
+    Properties:
+      TemplateURL: 'cfn-secret-provider/cloudformation/cfn-resource-provider.yaml'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+  APISecret:
+    Type: 'Custom::Secret'
+    # cheat
+    Condition: HasIAM
+    Properties:
+      Name: !Sub '/${AWS::StackName}/API_SECRET'
+      Alphabet: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+      Length: 32
+      ReturnSecret: True
+      Version: v1
+      RefreshOnUpdate: True
+      NoEcho: True
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider'
+
+  VPCStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasVPC
+    Properties:
+      TemplateURL: 'aws-cf-templates/vpc/vpc-2azs.yaml'
+      Parameters:
+        ClassB: !Sub '${ClassB}'
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+  KMSStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasVPC
+    Properties:
+      TemplateURL: 'aws-cf-templates/security/kms-key.yaml'
+      Parameters:
+        ParentAlertStack: !If
+        - HasAlert
+        - !GetAtt [ AlertStack, Outputs.StackName ]
+        - !Ref 'AWS::NoValue'
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+  SGStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasSG
+    Properties:
+      TemplateURL: 'aws-cf-templates/state/client-sg.yaml'
+      Parameters:
+        ParentVPCStack: !GetAtt [ VPCStack, Outputs.StackName ]
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+
+  # --- RDS resources
+  RDSPassword:
+    Type: 'Custom::Secret'
+    Condition: HasRDS
+    Properties:
+      Name: !Sub '/${AWS::StackName}/RDS_PASSWORD'
+      Alphabet: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+      Length: 16
+      ReturnSecret: True
+      Version: v1
+      RefreshOnUpdate: True
+      NoEcho: True
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider'
+
+  RDSStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasRDS
+    Properties:
+      TemplateURL: 'aws-cf-templates/state/rds-mysql.yaml'
+      Parameters:
+        ParentVPCStack: !GetAtt [ VPCStack, Outputs.StackName ]
+        ParentClientStack: !GetAtt [ SGStack, Outputs.StackName ]
+        ParentKmsKeyStack: !If
+        - HasStorageEncrypted
+        - !GetAtt [ KMSStack, Outputs.StackName ]
+        - !Ref 'AWS::NoValue'
+        ParentZoneStack: !If
+        - HasR53
+        - !GetAtt [ R53Stack, Outputs.StackName ]
+        - !Ref 'AWS::NoValue'
+        ParentAlertStack: !If
+        - HasAlert
+        - !GetAtt [ AlertStack, Outputs.StackName ]
+        - !Ref 'AWS::NoValue'
+        DBInstanceClass: !Sub '${DBInstanceClass}'
+        DBName: 'ebdb'
+        DBBackupRetentionPeriod: !Sub '${RetentionInDays}'
+        DBMasterUsername: 'admin'
+        DBMasterUserPassword: !Sub '${RDSPassword.Secret}'
+        EngineVersion: 8.0.30
+        SubDomainNameWithDot: !Sub 'mysql-${AWS::StackName}.'
+        DBMultiAZ: false
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+  DBParameterGroup:
+    Type: 'AWS::RDS::DBParameterGroup'
+    Condition: HasRDS
+    DependsOn: RDSStack
+    Properties:
+      Description: !Sub '${AWS::StackName} with event_scheduler enabled.'
+      Family: mysql8.0
+      Parameters:
+        event_scheduler: 'ON'
+      Tags:
+      - Key: NameTag
+        Value: !Sub '${AWS::StackName}'
+
+  ModifyDBInstance:
+    Type: 'Custom::ModifyDBInstance'
+    Condition: HasRDS
+    DependsOn: DBParameterGroup
+    Version: 1.0
+    Properties:
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:generic-custom-resource-provider'
+      AgentService: rds
+      AgentType: client
+      AgentCreateMethod: modify_db_instance
+      AgentCreateArgs: !Sub |
+        {
+          "DBInstanceIdentifier": "${RDSStack.Outputs.InstanceName}",
+          "DBParameterGroupName": "${DBParameterGroup}",
+          "ApplyImmediately": true
+        }
+      AgentUpdateMethod: modify_db_instance
+      AgentUpdateArgs: !Sub |
+        {
+          "DBInstanceIdentifier": "${RDSStack.Outputs.InstanceName}",
+          "DBParameterGroupName": "${DBParameterGroup}",
+          "ApplyImmediately": true
+        }
+      AgentDeleteMethod: modify_db_instance
+      AgentDeleteArgs: !Sub |
+        {
+          "DBInstanceIdentifier": "${RDSStack.Outputs.InstanceName}",
+          "DBParameterGroupName": "default.mysql8.0",
+          "ApplyImmediately": true
+        }
+  # --- end
+
+
+  R53Stack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasR53
+    Properties:
+      TemplateURL: 'aws-cf-templates/vpc/zone-public.yaml'
+      Parameters:
+        Name: !Sub '${DomainName}'
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+  ACMStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasACM
+    Properties:
+      TemplateURL: 'acm.yml'
+      Parameters:
+        NameTag: !Sub '${AWS::StackName}'
+        DomainName: !GetAtt [ R53Stack, Outputs.HostedZoneName ]
+        ValidationDomain: !GetAtt [ R53Stack, Outputs.HostedZoneName ]
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+  S3Stack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasS3
+    Properties:
+      TemplateURL: 's3.yml'
+      Parameters:
+        NameTag: !Sub '${AWS::StackName}'
+        ELBPrincipal: !FindInMap [ RegionMap, !Ref 'AWS::Region', 'AWS' ]
+        RetentionInDays: !Ref 'RetentionInDays'
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+  IAMStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasIAM
+    Properties:
+      TemplateURL: 'iam.yml'
+      Parameters:
+        NameTag: !Sub '${AWS::StackName}'
+        ImagesBucket: !GetAtt [ S3Stack, Outputs.ImagesBucket ]
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+  CloudWatchStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasCW
+    Properties:
+      TemplateURL: 'logs.yml'
+      Parameters:
+        NameTag: !Sub '${AWS::StackName}'
+        RetentionInDays: !Ref 'RetentionInDays'
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+
+  # --- ElastiCache resources
+  RedisPassword:
+    Type: 'Custom::Secret'
+    Condition: HasEC
+    Properties:
+      Name: !Sub '/${AWS::StackName}/REDIS_AUTH_TOKEN'
+      Alphabet: 'abcdefghijklmnopqrstuvwxyz_~!#$%^&*()-=+\;/ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+      Length: 16
+      ReturnSecret: True
+      Version: v1
+      RefreshOnUpdate: True
+      NoEcho: True
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider'
+
+  ECStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasEC
+    Properties:
+      TemplateURL: 'aws-cf-templates/state/elasticache-redis.yaml'
+      Parameters:
+        ParentVPCStack: !GetAtt [ VPCStack, Outputs.StackName ]
+        ParentClientStack: !GetAtt [ SGStack, Outputs.StackName ]
+        ParentZoneStack: !If
+        - HasR53
+        - !GetAtt [ R53Stack, Outputs.StackName ]
+        - !Ref 'AWS::NoValue'
+        ParentAlertStack: !If
+        - HasAlert
+        - !GetAtt [ AlertStack, Outputs.StackName ]
+        - !Ref 'AWS::NoValue'
+        EngineVersion: '5.0.0'
+        NumReplicas: 0
+        CacheNodeType: !Ref 'CacheNodeType'
+        TransitEncryption: !Sub '${TransitEncryption}'
+        AuthToken: !If [ HasTransitEncryption, !Sub '${RedisPassword.Secret}', !Ref 'AWS::NoValue' ]
+        SubDomainName: !Sub 'cache-${AWS::StackName}'
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+  # --- end
+
+  EBSStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Condition: HasEBS
+    DependsOn: APISecret
+    Properties:
+      TemplateURL: 'ebs-template.yml'
+      Parameters:
+        NameTag: !Sub '${AWS::StackName}'
+        InstanceSize: !Ref 'InstanceSize'
+        InstanceSizeSpot: !Ref 'InstanceSizeSpot'
+        SpotInstance: !Ref 'SpotInstance'
+        MaxSpotPrice: !FindInMap [ SpotPriceMap, !Ref 'AWS::Region', !FindInMap [ InstanceLookup, !Ref 'InstanceSizeSpot', 'Alias' ]]
+        EBSServiceRoleArn: !GetAtt [ IAMStack, Outputs.ServiceRoleArn ]
+        EBSEC2ServiceRoleArn: !GetAtt [ IAMStack, Outputs.InstanceProfileArn ]
+        MinInstancesInService: !Ref 'MinInstancesInService'
+        MaxSize: !Ref 'MaxSize'
+        MinSize: !Ref 'MinSize'
+        VpcId: !GetAtt [ VPCStack, Outputs.VPC ]
+        PrivateSecurityGroup: !GetAtt [ SGStack, Outputs.ClientSecurityGroup ]
+        SSLCertificateArn: !GetAtt [ ACMStack, Outputs.SSLCertificateArn ]
+        ELBLogsBucket: !GetAtt [ S3Stack, Outputs.ELBLogsBucket ]
+        SolutionStackName: !Ref 'SolutionStackName'
+        PrivateSubnets: !GetAtt [ VPCStack, Outputs.SubnetsPrivate ]
+        PublicSubnets: !GetAtt [ VPCStack, Outputs.SubnetsPublic ]
+        SumoLogicAccountId: !If [ HasSumo, !Ref 'SumoLogicAccountId', !Ref 'AWS::NoValue' ]
+        RetentionInDays: !Ref 'RetentionInDays'
+        NotificationTopicARN: !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+        MgmtCidrBlock: !Sub '${MgmtCidrBlock}'
+        APISecretPath: !Sub '/${AWS::StackName}/API_SECRET'
+        DNSName: !GetAtt [ RDSStack, Outputs.DNSName ]
+        PrimaryEndPointAddress: !GetAtt [ ECStack, Outputs.PrimaryEndPointAddress ]
+        DomainName: !Ref 'DomainName'
+        RDSPassword: !Sub '${RDSPassword.Secret}'
+        BackendAppBundle: !Sub '${BackendAppBundle}'
+        FrontendAppBundle: !Sub '${FrontendAppBundle}'
+        OnDemandBaseCapacity: !Sub '${OnDemandBaseCapacity}'
+        OnDemandPercentageAboveBaseCapacity: !Sub '${OnDemandPercentageAboveBaseCapacity}'
+      NotificationARNs:
+      - !If
+        - HasNotifySNS
+        - !Ref 'NotificationTopic'
+        - !If
+          - HasAlert
+          - !GetAtt [ AlertStack, Outputs.TopicARN ]
+          - !Ref 'AWS::NoValue'
+      TimeoutInMinutes: !Ref 'TimeoutInMinutes'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}'
+
+
+Outputs:
+  StackName:
+    Value: !Ref 'AWS::StackName'
+    Export:
+      Name: !Sub 'StackName-${AWS::StackName}'
+  EBSStack:
+    Condition: HasEBS
+    Value: !GetAtt [ EBSStack, Outputs.EBSStackName ]
+    Export:
+      Name: !Sub 'EBSStackName-${AWS::StackName}'
+  S3Stack:
+    Condition: HasS3
+    Value: !GetAtt [ S3Stack, Outputs.S3StackName ]
+    Export:
+      Name: !Sub 'S3StackName-${AWS::StackName}'
+  IAMStack:
+    Condition: HasIAM
+    Value: !GetAtt [ IAMStack, Outputs.IAMStackName ]
+    Export:
+      Name: !Sub 'IAMStackName-${AWS::StackName}'
+  CloudWatchStack:
+    Condition: HasCW
+    Value: !GetAtt [ CloudWatchStack, Outputs.CloudWatchStackName ]
+    Export:
+      Name: !Sub 'CloudWatchStackName-${AWS::StackName}'
+  ACMStack:
+    Condition: HasACM
+    Value: !GetAtt [ ACMStack, Outputs.ACMStackName ]
+    Export:
+      Name: !Sub 'ACMStackName-${AWS::StackName}'
+  LambdaStack:
+    Condition: HasLambda
+    Value: !GetAtt [ LambdaStack, Outputs.StackName ]
+    Export:
+      Name: !Sub 'LambdaStackName-${AWS::StackName}'
+  RDSStack:
+    Condition: HasRDS
+    Value: !GetAtt [ RDSStack, Outputs.StackName ]
+    Export:
+      Name: !Sub 'RDSStackName-${AWS::StackName}'
+  ECStack:
+    Condition: HasEC
+    Value: !GetAtt [ ECStack, Outputs.StackName ]
+    Export:
+      Name: !Sub 'ECStackName-${AWS::StackName}'
+  R53Stack:
+    Condition: HasR53
+    Value: !GetAtt [ R53Stack, Outputs.StackName ]
+    Export:
+      Name: !Sub 'R53StackName-${AWS::StackName}'
+  AlertStack:
+    Condition: HasAlert
+    Value: !GetAtt [ AlertStack, Outputs.StackName ]
+    Export:
+      Name: !Sub 'AlertStackName-${AWS::StackName}'
+  KMSStack:
+    Condition: HasKMS
+    Value: !GetAtt [ KMSStack, Outputs.StackName ]
+    Export:
+      Name: !Sub 'KMSStackName-${AWS::StackName}'
+  SGStack:
+    Condition: HasSG
+    Value: !GetAtt [ SGStack, Outputs.StackName ]
+    Export:
+      Name: !Sub 'SGStackName-${AWS::StackName}'
+  VPCStack:
+    Condition: HasVPC
+    Value: !GetAtt [ VPCStack, Outputs.StackName ]
+    Export:
+      Name: !Sub 'VPCStackName-${AWS::StackName}'
