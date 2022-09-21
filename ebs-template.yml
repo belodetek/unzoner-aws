@@ -1,0 +1,898 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Elastic Beanstalk (EBS) resources'
+
+
+Parameters:
+  NameTag:
+    Type: String
+  VpcId:
+    Type: String
+  SolutionStackName:
+    Type: String
+  RetentionInDays:
+    Type: String
+  InstanceSize:
+    Type: String
+  InstanceSizeSpot:
+    Type: String
+  SpotInstance:
+    Type: String
+  MaxSpotPrice:
+    Type: String
+  EBSServiceRoleArn:
+    Type: String
+  EBSEC2ServiceRoleArn:
+    Type: String
+  PrivateSecurityGroup:
+    Type: String
+  MinInstancesInService:
+    Type: String
+  MinSize:
+    Type: String
+  MaxSize:
+    Type: String
+  PrivateSubnets:
+    Type: String
+  PublicSubnets:
+    Type: String
+  SSLCertificateArn:
+    Type: String
+  ELBLogsBucket:
+    Type: String
+  MgmtCidrBlock:
+    Type: String
+  APISecretPath:
+    Type: String
+  DNSName:
+    Type: String
+  PrimaryEndPointAddress:
+    Type: String
+  DomainName:
+    Type: String
+  RDSPassword:
+    Type: String
+    NoEcho: true
+  NotificationTopicARN:
+    Type: String
+    Default: ''
+  SumoLogicAccountId:
+    Type: String
+    Default: ''
+  BackendAppBundle:
+    Type: String
+    Default: ''
+  FrontendAppBundle:
+    Type: String
+    Default: ''
+  OnDemandBaseCapacity:
+    Type: String
+    Default: ''
+  OnDemandPercentageAboveBaseCapacity:
+    Type: String
+    Default: ''
+
+
+Conditions:
+  HasSumo: !Not [ !Equals [ '', !Ref 'SumoLogicAccountId' ]]
+  HasSNS: !Not [ !Equals [ '', !Ref 'NotificationTopicARN' ]]
+  HasSpot: !And
+  - !Equals [ 'true', !Ref 'SpotInstance' ]
+  - !Not [ !Equals [ 0, !Ref 'MaxSpotPrice' ]]
+  HasBackendAppBundle: !Not [ !Equals [ '', !Ref 'BackendAppBundle' ]]
+  HasFrontendAppBundle: !Not [ !Equals [ '', !Ref 'FrontendAppBundle' ]]
+  HasBackendStub: !Not [ !Condition HasBackendAppBundle ]
+  HasFrontendStub: !Not [ !Condition HasFrontendAppBundle ]
+  HasStub: !Or
+  - !Condition HasBackendStub
+  - !Condition HasFrontendStub
+  HasMixedInstances: !And
+  - !Not [ !Equals [ '', !Ref 'OnDemandBaseCapacity' ]]
+  - !Not [ !Equals [ '', !Ref 'OnDemandPercentageAboveBaseCapacity' ]]
+  - !Condition HasSpot
+
+
+Resources:
+  APISecret:
+    Type: 'Custom::GetSSMSecret'
+    Version: 1.0
+    Properties:
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:generic-custom-resource-provider'
+      NoEcho: True
+      Version: 1.0
+      AgentService: ssm
+      AgentType: client
+      AgentCreateMethod: get_parameter
+      AgentWaitQueryExpr: '$.Parameter.Value'
+      AgentCreateArgs: !Sub |
+        {
+          "Name": "${APISecretPath}",
+          "WithDecryption": true
+        }
+
+  PublicSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Sub '${NameTag} public security group.'
+      VpcId: !Ref 'VpcId'
+      SecurityGroupIngress:
+      - IpProtocol: icmp
+        Description: 'Allow inbound ICMP.'
+        FromPort: '-1'
+        ToPort: '-1'
+        CidrIp: '0.0.0.0/0'
+      - IpProtocol: tcp
+        Description: 'Allow inbound HTTP.'
+        FromPort: 80
+        ToPort: 80
+        CidrIp: '0.0.0.0/0'
+      - IpProtocol: tcp
+        Description: 'Allow inbound HTTPS.'
+        FromPort: 443
+        ToPort: 443
+        CidrIp: '0.0.0.0/0'
+      - IpProtocol: icmpv6
+        Description: 'Allow inbound ICMPv6.'
+        FromPort: '-1'
+        ToPort: '-1'
+        CidrIpv6: '::/0'
+      - IpProtocol: tcp
+        Description: 'Allow inbound HTTP (IPv6).'
+        FromPort: 80
+        ToPort: 80
+        CidrIpv6: '::/0'
+      - IpProtocol: tcp
+        Description: 'Allow inbound HTTPS (IPv6).'
+        FromPort: 443
+        ToPort: 443
+        CidrIpv6: '::/0'
+      SecurityGroupEgress:
+      - IpProtocol: '-1'
+        Description: 'Allow all outbound IPv4.'
+        FromPort: '-1'
+        ToPort: '-1'
+        CidrIp: '0.0.0.0/0'
+      - IpProtocol: '-1'
+        Description: 'Allow all outbound (IPv6).'
+        FromPort: '-1'
+        ToPort: '-1'
+        CidrIpv6: '::/0'
+
+  PrivateKey:
+    Type: 'Custom::RSAKey'
+    Version: 1.0
+    Properties:
+      Name: !Sub '/rsa-private-keys/${AWS::StackName}/id_rsa'
+      Version: v1
+      RefreshOnUpdate: True
+      NoEcho: True
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider'
+
+  KeyPair:
+    Type: 'Custom::KeyPair'
+    Version: 1.0
+    DependsOn: PrivateKey
+    Properties:
+      Name: !Sub '${AWS::StackName}-keypair'
+      NoEcho: True
+      RefreshOnUpdate: True
+      PublicKeyMaterial: !GetAtt PrivateKey.PublicKey
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider'
+
+  SumoRole:
+    Type: 'AWS::IAM::Role'
+    Condition: HasSumo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            AWS: 'arn:aws:iam::926226587429:root'
+          Action: sts:AssumeRole
+          Condition:
+            StringEquals:
+              sts:ExternalId: !Ref 'SumoLogicAccountId'
+      Path: '/'
+      Policies:
+      - PolicyName: 'SumoPolicy'
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 's3:GetObject'
+            - 's3:GetObjectVersion'
+            - 's3:ListBucketVersions'
+            - 's3:ListBucket'
+            Resource:
+            - !Sub 'arn:aws:s3:::${ELBLogsBucket}/*'
+            - !Sub 'arn:aws:s3:::${ELBLogsBucket}'
+
+  Application:
+    Type: 'AWS::ElasticBeanstalk::Application'
+    Properties:
+      Description: !Sub '${NameTag} Elastic Beanstalk application'
+      ResourceLifecycleConfig:
+        ServiceRole: !Ref 'EBSServiceRoleArn'
+        VersionLifecycleConfig:
+          MaxCountRule:
+            DeleteSourceFromS3: true
+            Enabled: true
+            MaxCount: 3
+
+  # https://github.com/aws-samples/eb-python-flask
+  VersionStub:
+    Type: 'AWS::ElasticBeanstalk::ApplicationVersion'
+    Condition: HasStub
+    Properties:
+      ApplicationName: !Ref 'Application'
+      Description: !Sub '${NameTag} stub application version.'
+      SourceBundle: 'eb-python-flask'
+
+  BackendAppVersion:
+    Type: 'AWS::ElasticBeanstalk::ApplicationVersion'
+    Condition: HasBackendAppBundle
+    Properties:
+      ApplicationName: !Ref 'Application'
+      Description: !Sub '${NameTag} backend application version.'
+      SourceBundle:
+        S3Bucket: !Sub 'elasticbeanstalk-${AWS::Region}-${AWS::AccountId}'
+        S3Key: !Sub '${BackendAppBundle}'
+
+  FrontendAppVersion:
+    Type: 'AWS::ElasticBeanstalk::ApplicationVersion'
+    Condition: HasFrontendAppBundle
+    Properties:
+      ApplicationName: !Ref 'Application'
+      Description: !Sub '${NameTag} frontend application version.'
+      SourceBundle:
+        S3Bucket: !Sub 'elasticbeanstalk-${AWS::Region}-${AWS::AccountId}'
+        S3Key: !Sub '${FrontendAppBundle}'
+
+  BackendConfigurationTemplate:
+    Type: 'AWS::ElasticBeanstalk::ConfigurationTemplate'
+    DependsOn: KeyPair
+    Properties:
+      ApplicationName: !Ref 'Application'
+      Description: !Sub '${NameTag} backend configuration template'
+      OptionSettings:
+      - Namespace: 'aws:elasticbeanstalk:command'
+        OptionName: 'DeploymentPolicy'
+        Value: Rolling
+      - Namespace: 'aws:elasticbeanstalk:command'
+        OptionName: 'BatchSize'
+        Value: 50
+      - Namespace: 'aws:elasticbeanstalk:sns:topics'
+        OptionName: 'Notification Topic ARN'
+        Value: !If [ HasSNS, !Ref 'NotificationTopicARN', !Ref 'AWS::NoValue' ]
+      - Namespace: 'aws:autoscaling:asg'
+        OptionName: MinSize
+        Value: !Ref 'MinSize'
+      - Namespace: 'aws:autoscaling:asg'
+        OptionName: MaxSize
+        Value: !Ref 'MaxSize'
+      - Namespace: 'aws:autoscaling:updatepolicy:rollingupdate'
+        OptionName: MinInstancesInService
+        Value: !Ref 'MinInstancesInService'
+      - Namespace: 'aws:elasticbeanstalk:environment'
+        OptionName: EnvironmentType
+        Value: 'LoadBalanced'
+      - Namespace: 'aws:elasticbeanstalk:environment'
+        OptionName: LoadBalancerType
+        Value: 'application'
+      - Namespace: 'aws:elasticbeanstalk:environment'
+        OptionName: ServiceRole
+        Value: !Ref 'EBSServiceRoleArn'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: IamInstanceProfile
+        Value: !Ref 'EBSEC2ServiceRoleArn'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: BlockDeviceMappings
+        Value: '/dev/xvdcz=:12:true:gp2'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: EC2KeyName
+        Value: !Sub '${AWS::StackName}-keypair'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: InstanceType
+        Value: !Ref 'InstanceSizeSpot'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: SecurityGroups
+        Value: !Ref 'PrivateSecurityGroup'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: SSHSourceRestriction
+        Value: !Sub  'tcp, 22, 22, ${MgmtCidrBlock}'
+      - Namespace: 'aws:autoscaling:updatepolicy:rollingupdate'
+        OptionName: RollingUpdateType
+        Value: 'Health'
+      - Namespace: 'aws:autoscaling:updatepolicy:rollingupdate'
+        OptionName: RollingUpdateEnabled
+        Value: true
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: AssociatePublicIpAddress
+        Value: true
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: ELBScheme
+        Value: 'internet-facing'
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: DBSubnets
+        Value: !Ref 'PrivateSubnets'
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: ELBSubnets
+        Value: !Ref 'PublicSubnets'
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: Subnets
+        Value: !Ref 'PublicSubnets'
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: VpcId
+        Value: !Ref 'VpcId'
+      - Namespace: 'aws:elasticbeanstalk:cloudwatch:logs'
+        OptionName: StreamLogs
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:cloudwatch:logs'
+        OptionName: DeleteOnTerminate
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:cloudwatch:logs'
+        OptionName: RetentionInDays
+        Value: !Ref 'RetentionInDays'
+      - Namespace: 'aws:elasticbeanstalk:cloudwatch:logs:health'
+        OptionName: HealthStreamingEnabled
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:cloudwatch:logs:health'
+        OptionName: DeleteOnTerminate
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: EC2_SPOT_PRICE
+        Value: !If [ HasSpot, !Ref 'MaxSpotPrice', !Ref 'AWS::NoValue' ]
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: AWS_REGION
+        Value: !Ref 'AWS::Region'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: AWS_ACCOUNT_ID
+        Value: !Ref 'AWS::AccountId'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: API_SECRET
+        Value: !Ref 'APISecret'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: RDS_HOSTNAME
+        Value: !Ref 'DNSName'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: CACHE_HOST
+        Value: !Ref 'PrimaryEndPointAddress'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: API_HOST
+        Value: !Sub 'https://api-${NameTag}.${DomainName}'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: RDS_PASSWORD
+        Value: !Sub '${RDSPassword}'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: BLACKBOX_RETURN_URL
+        Value: !Sub 'https://dash-${NameTag}.${DomainName}'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: ENV
+        Value: !Select [ 1, !Split [ '-', !Sub '${NameTag}' ]]
+      - Namespace: 'aws:elasticbeanstalk:managedactions'
+        OptionName: ManagedActionsEnabled
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:managedactions'
+        OptionName: PreferredStartTime
+        Value: 'Sun:10:00'
+      - Namespace: 'aws:elasticbeanstalk:managedactions:platformupdate'
+        OptionName: UpdateLevel
+        Value: 'minor'
+      - Namespace: 'aws:elasticbeanstalk:managedactions:platformupdate'
+        OptionName: InstanceRefreshEnabled
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:healthreporting:system'
+        OptionName: SystemType
+        Value: 'enhanced'
+      # .ebextensions/94-redirect.config
+      - Namespace: 'aws:elbv2:listener:80'
+        OptionName: ListenerEnabled
+        Value: false
+      - Namespace: 'aws:elbv2:listener:443'
+        OptionName: Protocol
+        Value: 'HTTPS'
+      - Namespace: 'aws:elbv2:listener:443'
+        OptionName: SSLCertificateArns
+        Value: !Ref 'SSLCertificateArn'
+      - Namespace: 'aws:elbv2:listener:443'
+        OptionName: SSLPolicy
+        Value: 'ELBSecurityPolicy-TLS-1-2-2017-01'
+      - Namespace: 'aws:elbv2:loadbalancer'
+        OptionName: SecurityGroups
+        Value: !Ref 'PublicSecurityGroup'
+      - Namespace: 'aws:elbv2:loadbalancer'
+        OptionName: ManagedSecurityGroup
+        Value: !Ref 'PublicSecurityGroup'
+      - Namespace: 'aws:elbv2:loadbalancer'
+        OptionName: AccessLogsS3Bucket
+        Value: !Ref 'ELBLogsBucket'
+      - Namespace: 'aws:elbv2:loadbalancer'
+        OptionName: AccessLogsS3Enabled
+        Value: true
+      SolutionStackName: !Ref 'SolutionStackName'
+
+  # https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/command-options.html
+  FrontendConfigurationTemplate:
+    Type: 'AWS::ElasticBeanstalk::ConfigurationTemplate'
+    DependsOn: KeyPair
+    Properties:
+      ApplicationName: !Ref 'Application'
+      Description: !Sub '${NameTag} frontend configuration template'
+      OptionSettings:
+      - Namespace: 'aws:elasticbeanstalk:command'
+        OptionName: 'DeploymentPolicy'
+        Value: Rolling
+      - Namespace: 'aws:elasticbeanstalk:command'
+        OptionName: 'BatchSize'
+        Value: 50
+      - Namespace: 'aws:elasticbeanstalk:sns:topics'
+        OptionName: 'Notification Topic ARN'
+        Value: !If [ HasSNS, !Ref 'NotificationTopicARN', !Ref 'AWS::NoValue' ]
+      - Namespace: 'aws:autoscaling:asg'
+        OptionName: MinSize
+        Value: !Ref 'MinSize'
+      - Namespace: 'aws:autoscaling:asg'
+        OptionName: MaxSize
+        Value: !Ref 'MaxSize'
+      - Namespace: 'aws:autoscaling:updatepolicy:rollingupdate'
+        OptionName: MinInstancesInService
+        Value: !Ref 'MinInstancesInService'
+      - Namespace: 'aws:elasticbeanstalk:environment'
+        OptionName: EnvironmentType
+        Value: 'LoadBalanced'
+      - Namespace: 'aws:elasticbeanstalk:environment'
+        OptionName: LoadBalancerType
+        Value: 'application'
+      - Namespace: 'aws:elasticbeanstalk:environment'
+        OptionName: ServiceRole
+        Value: !Ref 'EBSServiceRoleArn'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: IamInstanceProfile
+        Value: !Ref 'EBSEC2ServiceRoleArn'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: BlockDeviceMappings
+        Value: '/dev/xvdcz=:12:true:gp2'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: EC2KeyName
+        Value: !Sub '${AWS::StackName}-keypair'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: InstanceType
+        Value: !Ref 'InstanceSize'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: SecurityGroups
+        Value: !Ref 'PrivateSecurityGroup'
+      - Namespace: 'aws:autoscaling:launchconfiguration'
+        OptionName: SSHSourceRestriction
+        Value: !Sub  'tcp, 22, 22, ${MgmtCidrBlock}'
+      - Namespace: 'aws:autoscaling:updatepolicy:rollingupdate'
+        OptionName: RollingUpdateType
+        Value: 'Health'
+      - Namespace: 'aws:autoscaling:updatepolicy:rollingupdate'
+        OptionName: RollingUpdateEnabled
+        Value: true
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: AssociatePublicIpAddress
+        Value: true
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: ELBScheme
+        Value: 'internet-facing'
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: DBSubnets
+        Value: !Ref 'PrivateSubnets'
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: ELBSubnets
+        Value: !Ref 'PublicSubnets'
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: Subnets
+        Value: !Ref 'PublicSubnets'
+      - Namespace: 'aws:ec2:vpc'
+        OptionName: VpcId
+        Value: !Ref 'VpcId'
+      - Namespace: 'aws:elasticbeanstalk:cloudwatch:logs'
+        OptionName: StreamLogs
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:cloudwatch:logs'
+        OptionName: DeleteOnTerminate
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:cloudwatch:logs'
+        OptionName: RetentionInDays
+        Value: !Ref 'RetentionInDays'
+      - Namespace: 'aws:elasticbeanstalk:cloudwatch:logs:health'
+        OptionName: HealthStreamingEnabled
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:cloudwatch:logs:health'
+        OptionName: DeleteOnTerminate
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: EC2_SPOT_PRICE
+        Value: !If [ HasSpot, !Ref 'MaxSpotPrice', !Ref 'AWS::NoValue' ]
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: AWS_REGION
+        Value: !Ref 'AWS::Region'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: AWS_ACCOUNT_ID
+        Value: !Ref 'AWS::AccountId'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: API_SECRET
+        Value: !Ref 'APISecret'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: DASHBOARD_HOST
+        Value: !Sub 'https://dash-${NameTag}.${DomainName}'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: API_HOST
+        Value: !Sub 'https://api-${NameTag}.${DomainName}'
+      - Namespace: 'aws:elasticbeanstalk:application:environment'
+        OptionName: ENV
+        Value: !Select [ 1, !Split [ '-', !Sub '${NameTag}' ]]
+      - Namespace: 'aws:elasticbeanstalk:managedactions'
+        OptionName: ManagedActionsEnabled
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:managedactions'
+        OptionName: PreferredStartTime
+        Value: 'Sun:10:00'
+      - Namespace: 'aws:elasticbeanstalk:managedactions:platformupdate'
+        OptionName: UpdateLevel
+        Value: 'minor'
+      - Namespace: 'aws:elasticbeanstalk:managedactions:platformupdate'
+        OptionName: InstanceRefreshEnabled
+        Value: true
+      - Namespace: 'aws:elasticbeanstalk:healthreporting:system'
+        OptionName: SystemType
+        Value: 'enhanced'
+      # .ebextensions/94-redirect.config
+      - Namespace: 'aws:elbv2:listener:80'
+        OptionName: ListenerEnabled
+        Value: false
+      - Namespace: 'aws:elbv2:listener:443'
+        OptionName: Protocol
+        Value: 'HTTPS'
+      - Namespace: 'aws:elbv2:listener:443'
+        OptionName: SSLCertificateArns
+        Value: !Ref 'SSLCertificateArn'
+      - Namespace: 'aws:elbv2:listener:443'
+        OptionName: SSLPolicy
+        Value: 'ELBSecurityPolicy-TLS-1-2-2017-01'
+      - Namespace: 'aws:elbv2:loadbalancer'
+        OptionName: SecurityGroups
+        Value: !Ref 'PublicSecurityGroup'
+      - Namespace: 'aws:elbv2:loadbalancer'
+        OptionName: ManagedSecurityGroup
+        Value: !Ref 'PublicSecurityGroup'
+      - Namespace: 'aws:elbv2:loadbalancer'
+        OptionName: AccessLogsS3Bucket
+        Value: !Ref 'ELBLogsBucket'
+      - Namespace: 'aws:elbv2:loadbalancer'
+        OptionName: AccessLogsS3Enabled
+        Value: true
+      SolutionStackName: !Ref 'SolutionStackName'
+
+  Backend:
+    Type: 'AWS::ElasticBeanstalk::Environment'
+    Properties:
+      ApplicationName: !Ref 'Application'
+      Description: !Sub '${NameTag} backend environment'
+      TemplateName: !Ref 'BackendConfigurationTemplate'
+      VersionLabel: !If
+      - HasBackendStub
+      - !Sub '${VersionStub}'
+      - !Sub '${BackendAppVersion}'
+      Tags:
+      - Key: NameTag
+        Value: !Sub '${NameTag}'
+
+  BackendAutoScalingGroupName:
+    Type: 'Custom::AutoScalingGroupName'
+    Condition: HasMixedInstances
+    DependsOn: Backend
+    Properties:
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:generic-custom-resource-provider'
+      AgentService: autoscaling
+      AgentType: client
+      AgentCreateMethod: describe_auto_scaling_groups
+      AgentWaitQueryExpr: !Sub '$.AutoScalingGroups[*].Tags[?(@.Key=="elasticbeanstalk:environment-name" && @.Value=="${Backend}")].ResourceId'
+
+  BackendAutoScalingLaunchConfigurationName:
+    Type: 'Custom::AutoScalingLaunchConfigurationName'
+    Condition: HasMixedInstances
+    DependsOn: BackendAutoScalingGroupName
+    Properties:
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:generic-custom-resource-provider'
+      AgentService: autoscaling
+      AgentType: client
+      AgentCreateMethod: describe_auto_scaling_groups
+      AgentWaitQueryExpr: !Sub '$.AutoScalingGroups[?(@.AutoScalingGroupName=="${BackendAutoScalingGroupName}")].LaunchConfigurationName'
+
+  CreateBackendLaunchTemplateFromConfiguration:
+    Type: 'Custom::CreateLaunchTemplateFromConfiguration'
+    Condition: HasMixedInstances
+    DependsOn: BackendAutoScalingLaunchConfigurationName
+    Version: 1.0
+    Properties:
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:generic-custom-resource-provider'
+      Version: 1.0
+      # custom module: autoscaling.py
+      AgentService: autoscaling
+      AgentType: custom
+      AgentResponseNode: LaunchTemplate
+      AgentCreateMethod: create_launch_template_from_configuration
+      AgentDeleteMethod: delete_launch_template
+      AgentCreateArgs:
+        LaunchConfigurationName: !Sub '${BackendAutoScalingLaunchConfigurationName}'
+        LaunchTemplateName: !Sub '${AWS::StackName}-backend-launch-template'
+        Description: !Sub 'Created from ${BackendAutoScalingLaunchConfigurationName}.'
+        TagSpecifications:
+        - ResourceType: 'launch-template'
+          Tags:
+          - Key: 'Name'
+            Value: !Sub '${NameTag}'
+      AgentDeleteArgs:
+        LaunchTemplateName: !Sub '${AWS::StackName}-backend-launch-template'
+
+  BackendMixedInstancesPolicy:
+    Type: 'Custom::MixedInstancesPolicy'
+    Condition: HasMixedInstances
+    DependsOn: CreateBackendLaunchTemplateFromConfiguration
+    Version: 1.0
+    Properties:
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:generic-custom-resource-provider'
+      Version: 1.0
+      # custom module: autoscaling.py
+      AgentService: autoscaling
+      AgentType: custom
+      AgentResponseNode: ResponseMetadata
+      AgentCreateMethod: update_auto_scaling_group
+      AgentUpdateMethod: update_auto_scaling_group
+      # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-autoscaling-autoscalinggroup-mixedinstancespolicy.htmlß
+      AgentCreateArgs: !Sub |
+        {
+          "AutoScalingGroupName": "${BackendAutoScalingGroupName}",
+          "MixedInstancesPolicy": {
+            "LaunchTemplate": {
+              "LaunchTemplateSpecification": {
+                "LaunchTemplateId": "${CreateBackendLaunchTemplateFromConfiguration.LaunchTemplateId}",
+                "Version": "1",
+              },
+              "Overrides": [
+                {
+                  "InstanceType": "${InstanceSizeSpot}"
+                }
+              ]
+            },
+            "InstancesDistribution": {
+              "OnDemandBaseCapacity": ${OnDemandBaseCapacity},
+              "OnDemandPercentageAboveBaseCapacity": ${OnDemandPercentageAboveBaseCapacity}
+            }
+          }
+        }
+      AgentUpdateArgs: !Sub |
+        {
+          "AutoScalingGroupName": "${BackendAutoScalingGroupName}",
+          "MixedInstancesPolicy": {
+            "LaunchTemplate": {
+              "LaunchTemplateSpecification": {
+                "LaunchTemplateId": "${CreateBackendLaunchTemplateFromConfiguration.LaunchTemplateId}",
+                "Version": "1",
+              },
+              "Overrides": [
+                {
+                  "InstanceType": "${InstanceSizeSpot}"
+                }
+              ]
+            },
+            "InstancesDistribution": {
+              "OnDemandBaseCapacity": ${OnDemandBaseCapacity},
+              "OnDemandPercentageAboveBaseCapacity": ${OnDemandPercentageAboveBaseCapacity}
+            }
+          }
+        }
+
+  # runs under AWS Free Tier (first 12 months after AWS account creation)
+  Frontend:
+    Type: 'AWS::ElasticBeanstalk::Environment'
+    Properties:
+      ApplicationName: !Ref 'Application'
+      Description: !Sub '${NameTag} frontend environment'
+      # neverSpot(tm), as Spot instances are not covered under AWS Free Tier
+      TemplateName: !Ref 'FrontendConfigurationTemplate'
+      VersionLabel: !If
+      - HasFrontendStub
+      - !Sub '${VersionStub}'
+      - !Sub '${FrontendAppVersion}'
+      Tags:
+      - Key: NameTag
+        Value: !Sub '${NameTag}'
+
+  FrontendAutoScalingGroupName:
+    Type: 'Custom::AutoScalingGroupName'
+    Condition: HasMixedInstances
+    DependsOn: Frontend
+    Properties:
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:generic-custom-resource-provider'
+      AgentService: autoscaling
+      AgentType: client
+      AgentCreateMethod: describe_auto_scaling_groups
+      AgentWaitQueryExpr: !Sub '$.AutoScalingGroups[*].Tags[?(@.Key=="elasticbeanstalk:environment-name" && @.Value=="${Frontend}")].ResourceId'
+
+  FrontendAutoScalingLaunchConfigurationName:
+    Type: 'Custom::AutoScalingLaunchConfigurationName'
+    Condition: HasMixedInstances
+    DependsOn: FrontendAutoScalingGroupName
+    Properties:
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:generic-custom-resource-provider'
+      AgentService: autoscaling
+      AgentType: client
+      AgentCreateMethod: describe_auto_scaling_groups
+      AgentWaitQueryExpr: !Sub '$.AutoScalingGroups[?(@.AutoScalingGroupName=="${FrontendAutoScalingGroupName}")].LaunchConfigurationName'
+
+  CreateFrontendLaunchTemplateFromConfiguration:
+    Type: 'Custom::CreateLaunchTemplateFromConfiguration'
+    Condition: HasMixedInstances
+    DependsOn: FrontendAutoScalingLaunchConfigurationName
+    Version: 1.0
+    Properties:
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:generic-custom-resource-provider'
+      Version: 1.0
+      # custom module: autoscaling.py
+      AgentService: autoscaling
+      AgentType: custom
+      AgentResponseNode: LaunchTemplate
+      AgentCreateMethod: create_launch_template_from_configuration
+      AgentDeleteMethod: delete_launch_template
+      AgentCreateArgs:
+        LaunchConfigurationName: !Sub '${FrontendAutoScalingLaunchConfigurationName}'
+        LaunchTemplateName: !Sub '${AWS::StackName}-frontend-launch-template'
+        Description: !Sub 'Created from ${FrontendAutoScalingLaunchConfigurationName}.'
+        TagSpecifications:
+        - ResourceType: 'launch-template'
+          Tags:
+          - Key: 'Name'
+            Value: !Sub '${NameTag}'
+      AgentDeleteArgs:
+        LaunchTemplateName: !Sub '${AWS::StackName}-frontend-launch-template'
+
+  FrontendMixedInstancesPolicy:
+    Type: 'Custom::MixedInstancesPolicy'
+    Condition: HasMixedInstances
+    DependsOn: CreateFrontendLaunchTemplateFromConfiguration
+    Version: 1.0
+    Properties:
+      ServiceToken: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:generic-custom-resource-provider'
+      Version: 1.0
+      # custom module: autoscaling.py
+      AgentService: autoscaling
+      AgentType: custom
+      AgentResponseNode: ResponseMetadata
+      AgentCreateMethod: update_auto_scaling_group
+      AgentUpdateMethod: update_auto_scaling_group
+      # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-autoscaling-autoscalinggroup-mixedinstancespolicy.html
+      AgentCreateArgs: !Sub |
+        {
+          "AutoScalingGroupName": "${FrontendAutoScalingGroupName}",
+          "MixedInstancesPolicy": {
+            "LaunchTemplate": {
+              "LaunchTemplateSpecification": {
+                "LaunchTemplateId": "${CreateFrontendLaunchTemplateFromConfiguration.LaunchTemplateId}",
+                "Version": "1",
+              },
+              "Overrides": [
+                {
+                  "InstanceType": "${InstanceSize}"
+                }
+              ]
+            },
+            "InstancesDistribution": {
+              "OnDemandBaseCapacity": 1,
+              "OnDemandPercentageAboveBaseCapacity": ${OnDemandPercentageAboveBaseCapacity}
+            }
+          }
+        }
+      AgentUpdateArgs: !Sub |
+        {
+          "AutoScalingGroupName": "${FrontendAutoScalingGroupName}",
+          "MixedInstancesPolicy": {
+            "LaunchTemplate": {
+              "LaunchTemplateSpecification": {
+                "LaunchTemplateId": "${CreateFrontendLaunchTemplateFromConfiguration.LaunchTemplateId}",
+                "Version": "1",
+              },
+              "Overrides": [
+                {
+                  "InstanceType": "${InstanceSize}"
+                }
+              ]
+            },
+            "InstancesDistribution": {
+              "OnDemandBaseCapacity": 1,
+              "OnDemandPercentageAboveBaseCapacity": ${OnDemandPercentageAboveBaseCapacity}
+            }
+          }
+        }
+
+
+Outputs:
+  EBSStackName:
+    Value: !Ref 'AWS::StackName'
+    Export:
+      Name: !Sub 'EBSStackName-${AWS::StackName}'
+  Application:
+    Value: !Ref 'Application'
+    Export:
+      Name: !Sub 'Application-${AWS::StackName}'
+  BackendAppVersion:
+    Value: !If
+    - HasBackendStub
+    - !Sub '${VersionStub}'
+    - !Sub '${BackendAppVersion}'
+    Export:
+      Name: !Sub 'BackendAppVersion-${AWS::StackName}'
+  FrontendAppVersion:
+    Value: !If
+    - HasFrontendStub
+    - !Sub '${VersionStub}'
+    - !Sub '${FrontendAppVersion}'
+    Export:
+      Name: !Sub 'FrontendAppVersion-${AWS::StackName}'
+  Backend:
+    Value: !Ref 'Backend'
+    Export:
+      Name: !Sub 'Backend-${AWS::StackName}'
+  BackendURL:
+    Value: !GetAtt Backend.EndpointURL
+    Export:
+      Name: !Sub 'BackendURL-${AWS::StackName}'
+  Frontend:
+    Value: !Ref 'Frontend'
+    Export:
+      Name: !Sub 'Frontend-${AWS::StackName}'
+  FrontendURL:
+    Value: !GetAtt Frontend.EndpointURL
+    Export:
+      Name: !Sub 'FrontendURL-${AWS::StackName}'
+  SumoRoleArn:
+    Condition: HasSumo
+    Description: 'ARN of the Sumo Logic cross-account log access role.'
+    Value: !GetAtt SumoRole.Arn
+    Export:
+      Name: !Sub 'SumoRoleArn-${AWS::StackName}'
+  BackendAutoScalingGroupName:
+    Condition: HasMixedInstances
+    Value: !Sub '${BackendAutoScalingGroupName}'
+    Export:
+      Name: !Sub 'BackendAutoScalingGroupName-${AWS::StackName}'
+  BackendAutoScalingLaunchConfigurationName:
+    Condition: HasMixedInstances
+    Value: !Sub '${BackendAutoScalingLaunchConfigurationName}'
+    Export:
+      Name: !Sub 'BackendLaunchConfigurationName-${AWS::StackName}'
+  BackendLaunchTemplateId:
+    Condition: HasMixedInstances
+    Value: !Sub '${CreateBackendLaunchTemplateFromConfiguration.LaunchTemplateId}'
+    Export:
+      Name: !Sub 'BackendLaunchTemplateId-${AWS::StackName}'
+  BackendLaunchTemplateName:
+    Condition: HasMixedInstances
+    Value: !Sub '${AWS::StackName}-backend-launch-template'
+    Export:
+      Name: !Sub 'BackendLaunchTemplateName-${AWS::StackName}'
+  FrontendAutoScalingGroupName:
+    Condition: HasMixedInstances
+    Value: !Sub '${FrontendAutoScalingGroupName}'
+    Export:
+      Name: !Sub 'FrontendAutoScalingGroupName-${AWS::StackName}'
+  FrontendAutoScalingLaunchConfigurationName:
+    Condition: HasMixedInstances
+    Value: !Sub '${FrontendAutoScalingLaunchConfigurationName}'
+    Export:
+      Name: !Sub 'FrontendLaunchConfigurationName-${AWS::StackName}'
+  FrontendLaunchTemplateId:
+    Condition: HasMixedInstances
+    Value: !Sub '${CreateFrontendLaunchTemplateFromConfiguration.LaunchTemplateId}'
+    Export:
+      Name: !Sub 'FrontendLaunchTemplateId-${AWS::StackName}'
+  FrontendLaunchTemplateName:
+    Condition: HasMixedInstances
+    Value: !Sub '${AWS::StackName}-backend-launch-template'
+    Export:
+      Name: !Sub 'FrontendLaunchTemplateName-${AWS::StackName}'

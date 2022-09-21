@@ -1,0 +1,48 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Certificate Manager (ACM) resources'
+
+
+Parameters:
+  NameTag:
+    Type: String
+  DomainName:
+    Type: String
+  ValidationDomain:
+    Type: String
+
+
+Resources:
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-certificatemanager-certificate.html
+  SSLCertificate:
+    Type: 'AWS::CertificateManager::Certificate'
+    Properties:
+      DomainName: !Sub '*.${DomainName}'
+      SubjectAlternativeNames:
+      - !Ref 'DomainName'
+      - !Sub '*.${DomainName}'
+      - !Ref 'ValidationDomain'
+      - !Sub '*.${ValidationDomain}'
+      DomainValidationOptions:
+      - DomainName: !Ref 'DomainName'
+        ValidationDomain: !Ref 'ValidationDomain'
+      - DomainName: !Sub '*.${DomainName}'
+        ValidationDomain: !Ref 'ValidationDomain'
+      - DomainName: !Ref 'ValidationDomain'
+        ValidationDomain: !Ref 'ValidationDomain'
+      - DomainName: !Sub '*.${ValidationDomain}'
+        ValidationDomain: !Ref 'ValidationDomain'
+      Tags:
+      - Key: Name
+        Value: !Sub '${NameTag}'
+
+
+Outputs:
+  ACMStackName:
+    Value: !Ref 'AWS::StackName'
+    Export:
+      Name: !Sub 'ACMStackName-${AWS::StackName}'
+  SSLCertificateArn:
+    Value: !Ref 'SSLCertificate'
+    Export:
+      Name: !Sub 'SSLCertificateArn-${AWS::StackName}'

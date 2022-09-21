@@ -1,0 +1,43 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudWatch resources'
+
+
+Parameters:
+  NameTag:
+    Type: String
+  RetentionInDays:
+    Type: String
+  SumoCWLogsLambdaArn:
+    Type: String
+    Default: ''
+
+
+Conditions:
+  HasSumo: !Not [ !Equals [ '', !Ref 'SumoCWLogsLambdaArn' ]]
+
+
+Resources:
+  LogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '${NameTag}-logs'
+      RetentionInDays: !Ref 'RetentionInDays'
+
+  LogGroupSubscription:
+    Type: 'AWS::Logs::SubscriptionFilter'
+    Condition: HasSumo
+    Properties:
+      DestinationArn: !Ref 'SumoCWLogsLambdaArn'
+      FilterPattern: ''
+      LogGroupName: !Ref 'LogGroup'
+
+Outputs:
+  CloudWatchStackName:
+    Value: !Ref 'AWS::StackName'
+    Export:
+      Name: !Sub 'CloudWatchStackName-${AWS::StackName}'
+  LogGroup:
+    Value: !Ref 'LogGroup'
+    Export:
+      Name: !Sub 'LogGroup-${AWS::StackName}'
