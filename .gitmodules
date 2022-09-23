@@ -3,7 +3,7 @@
 	url = https://github.com/binxio/cfn-secret-provider.git
 [submodule "aws-cf-templates"]
 	path = aws-cf-templates
-	url = https://github.com/ab77/aws-cf-templates.git
+	url = https://github.com/widdix/aws-cf-templates.git
 [submodule "cfn-generic-custom-resource"]
 	path = cfn-generic-custom-resource
 	url = https://github.com/ab77/cfn-generic-custom-resource.git
