@@ -368,9 +368,6 @@ Resources:
       - Namespace: 'aws:elasticbeanstalk:application:environment'
         OptionName: BLACKBOX_RETURN_URL
         Value: !Sub 'https://dash-${NameTag}.${DomainName}'
-      - Namespace: 'aws:elasticbeanstalk:application:environment'
-        OptionName: ENV
-        Value: !Select [ 1, !Split [ '-', !Sub '${NameTag}' ]]
       - Namespace: 'aws:elasticbeanstalk:managedactions'
         OptionName: ManagedActionsEnabled
         Value: true
@@ -523,9 +520,6 @@ Resources:
       - Namespace: 'aws:elasticbeanstalk:application:environment'
         OptionName: API_HOST
         Value: !Sub 'https://api-${NameTag}.${DomainName}'
-      - Namespace: 'aws:elasticbeanstalk:application:environment'
-        OptionName: ENV
-        Value: !Select [ 1, !Split [ '-', !Sub '${NameTag}' ]]
       - Namespace: 'aws:elasticbeanstalk:managedactions'
         OptionName: ManagedActionsEnabled
         Value: true

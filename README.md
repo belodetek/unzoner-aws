@@ -221,7 +221,6 @@
 ### unzoner-api
 > change `API_SECRET` back to previous value if re-deploying to a new AWS account
 
-
     git clone git@github.com:belodetek/unzoner-api.git
 
     pushd unzoner-api && git pull
@@ -242,7 +241,7 @@
     for env in $(cat .ebextensions/environment.template \
       | grep -E '^.*:\s[^\n]' | awk -F':' '{print $1}' | xargs echo); do unset $env; done
 
-    # (re)source env vars
+    # (re)source env vars (e.g.) env-dev
 
     cat .ebextensions/environment.template | envsubst \
       | grep -E 'option_settings:|aws:elasticbeanstalk:|^.*:\s[^\n]' > .ebextensions/environment.config
@@ -343,7 +342,7 @@
     for env in $(cat .ebextensions/environment.template \
       | grep -E '^.*:\s[^\n]' | awk -F':' '{print $1}' | xargs echo); do unset $env; done
 
-    # (re)source env vars
+    # (re)source env vars (e.g.) env-dev
 
     cat .ebextensions/environment.template | envsubst \
       | grep -E 'option_settings:|aws:elasticbeanstalk:|^.*:\s[^\n]' > .ebextensions/environment.config
