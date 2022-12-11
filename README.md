@@ -248,7 +248,7 @@
 
     cat .ebextensions/environment.config
 
-    eb deploy 
+    eb deploy
 
 
 #### mixed instances policy
