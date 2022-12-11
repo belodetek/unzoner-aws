@@ -16,3 +16,4 @@ jobs:
     with:
       repo_config: true
       repo_description: "CloudFormation templates to deploy black.box Unzoner backends."
+      repo_homepage: "belodetek.io"
