@@ -104,10 +104,10 @@
       --environment-name ${ebs_frontend_env} | jq -r .Environments[].VersionLabel)
 
     backend_app_bundle=$(aws elasticbeanstalk describe-application-versions \
-      --application-name ${ebs_app} | jq -r ".ApplicationVersions[] | select(.VersionLabel==\"${backend_version_label}\").SourceBundle.S3Key")
+      --application-name ${ebs_app} | jq -r --arg label $backend_version_label '.ApplicationVersions[] | select(.VersionLabel=="$label").SourceBundle.S3Key')
 
     frontend_app_bundle=$(aws elasticbeanstalk describe-application-versions \
-      --application-name ${ebs_app} | jq -r ".ApplicationVersions[] | select(.VersionLabel==\"${frontend_version_label}\").SourceBundle.S3Key")
+      --application-name ${ebs_app} | jq -r --arg label $frontend_version_label '.ApplicationVersions[] | select(.VersionLabel=="$label").SourceBundle.S3Key')
 
     date +%s > eb-python-flask/.ts
 
