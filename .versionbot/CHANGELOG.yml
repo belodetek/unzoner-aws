@@ -1,4 +1,15 @@
 - commits:
+    - subject: "docs: update"
+      hash: 7d9164063d2635ef8d1eda384b214a7aa05a87be
+      body: ""
+      footer:
+        Change-type: patch
+        change-type: patch
+      author: belodetek
+  version: 0.0.3
+  title: ""
+  date: 2023-01-30T22:22:27.417Z
+- commits:
     - subject: Flowzone versioning
       hash: 5f19e41c10d8ffd8d5cce1cf952cbf3b0801dd7c
       body: ""
