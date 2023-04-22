@@ -654,7 +654,7 @@ Resources:
         DBBackupRetentionPeriod: !Sub '${RetentionInDays}'
         DBMasterUsername: 'admin'
         DBMasterUserPassword: !Sub '${RDSPassword.Secret}'
-        EngineVersion: 8.0.30
+        EngineVersion: 8.0.32
         SubDomainNameWithDot: !Sub 'mysql-${AWS::StackName}.'
         DBMultiAZ: false
       NotificationARNs:
@@ -853,7 +853,7 @@ Resources:
         - HasAlert
         - !GetAtt [ AlertStack, Outputs.StackName ]
         - !Ref 'AWS::NoValue'
-        EngineVersion: '5.0.0'
+        EngineVersion: '7.0'
         NumReplicas: 0
         CacheNodeType: !Ref 'CacheNodeType'
         TransitEncryption: !Sub '${TransitEncryption}'

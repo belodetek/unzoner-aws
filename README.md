@@ -123,21 +123,21 @@
       FrontendAppBundle=${frontend_app_bundle} \
       AppIds=${RESIN_APP_ID} \
       DomainName=${DNS_DOMAIN} \
-      VPCTemplate=true \
-      KMSTemplate=true \
-      PasswordTemplate=true \
       SecretsTemplate=true \
-      LambdaTemplate=true \
-      AlertTemplate=true \
-      R53Template=true \
-      S3Template=true \
-      IAMTemplate=true \
-      CloudWatchTemplate=true \
-      ACMTemplate=true \
-      SGTemplate=true \
-      RDSTemplate=true \
-      ECTemplate=true \
-      EBSTemplate=true \
+      S3Template=false \
+      IAMTemplate=false \
+      VPCTemplate=false \
+      KMSTemplate=false \
+      LambdaTemplate=false \
+      PasswordTemplate=false \
+      R53Template=false \
+      AlertTemplate=false \
+      CloudWatchTemplate=false \
+      SGTemplate=false \
+      ACMTemplate=false \
+      RDSTemplate=false \
+      ECTemplate=false \
+      EBSTemplate=false \
       --tags \
       Name=${stack_name} \
       --no-execute-changeset
