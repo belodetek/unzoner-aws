@@ -104,10 +104,10 @@
       --environment-name ${ebs_frontend_env} | jq -r .Environments[].VersionLabel)
 
     backend_app_bundle=$(aws elasticbeanstalk describe-application-versions \
-      --application-name ${ebs_app} | jq -r --arg label $backend_version_label '.ApplicationVersions[] | select(.VersionLabel=="$label").SourceBundle.S3Key')
+      --application-name ${ebs_app} | jq -r --arg vl "$backend_version_label" '.ApplicationVersions[] | select(.VersionLabel==$vl).SourceBundle.S3Key')
 
     frontend_app_bundle=$(aws elasticbeanstalk describe-application-versions \
-      --application-name ${ebs_app} | jq -r --arg label $frontend_version_label '.ApplicationVersions[] | select(.VersionLabel=="$label").SourceBundle.S3Key')
+      --application-name ${ebs_app} | jq -r --arg vl "$frontend_version_label" '.ApplicationVersions[] | select(.VersionLabel==$vl).SourceBundle.S3Key')
 
     date +%s > eb-python-flask/.ts
 
@@ -244,7 +244,7 @@
     # (re)source env vars (e.g.) env-dev
 
     cat .ebextensions/environment.template | envsubst \
-      | grep -E 'option_settings:|aws:elasticbeanstalk:|^.*:\s[^\n]' > .ebextensions/environment.config
+      | grep -E 'option_settings:|aws:|^.*:\s[^\n]' > .ebextensions/environment.config
 
     cat .ebextensions/environment.config
 
@@ -345,7 +345,7 @@
     # (re)source env vars (e.g.) env-dev
 
     cat .ebextensions/environment.template | envsubst \
-      | grep -E 'option_settings:|aws:elasticbeanstalk:|^.*:\s[^\n]' > .ebextensions/environment.config
+      | grep -E 'option_settings:|aws:|^.*:\s[^\n]' > .ebextensions/environment.config
 
     cat .ebextensions/environment.config
 
