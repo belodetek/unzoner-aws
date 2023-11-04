@@ -1,4 +1,14 @@
 - commits:
+    - subject: updated troubleshooting
+      hash: e46258b2380b438cdaaeb110700c1a154216f109
+      body: ""
+      footer:
+        change-type: patch
+      author: belodetek
+  version: 0.0.6
+  title: ""
+  date: 2023-11-04T18:10:29.362Z
+- commits:
     - subject: change defult instance size
       hash: 93c7f03e6689690da5d180716a9511e648cb4f5b
       body: ""
