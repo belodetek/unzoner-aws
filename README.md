@@ -423,3 +423,10 @@
       --query 'Reservations[0].Instances[0].[PublicDnsName]' --output text)
 
     ssh -i id_rsa ec2-user@${public_dns_name}
+
+
+#### RDS (tunnel)
+
+    ssh -N -L 3306:${rds_hostname}:3306 -i id_rsa ec2-user@${public_dns_name} &
+
+    mysql -h 127.0.0.1 -u admin -D ebdb -p${rds_password}
